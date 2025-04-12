@@ -1,3 +1,4 @@
+
 from playwright.async_api import async_playwright
 
 import sys
@@ -11,6 +12,7 @@ import requests
 import json
 import os
 
+
 def requestHeader(appId, secretKey):
     nonceId = generateNonceId()
     md5Str = md5Encode(nonceId, appId, secretKey)
@@ -21,14 +23,17 @@ def requestHeader(appId, secretKey):
     }
 
 
+
 def generateRandom(length=6):
     characters = string.ascii_letters + string.digits
     random_string = ''.join(random.choice(characters) for _ in range(length))
     return random_string
 
 
+
 def generateNonceId():
     return str(int(time.time()* 1000)) + generateRandom()
+
 
 
 def md5Encode(nonceId, appId, secretKey):
@@ -41,6 +46,7 @@ def md5Encode(nonceId, appId, secretKey):
 def postRequest(url, data, headers):
     headers['Content-Type'] = 'application/json'
     return requests.post(url, json=data, headers=headers)
+
 
 
 def getRequest(url, headers):
@@ -97,7 +103,31 @@ async def main():
         print(f"环境总数: {total_environments}, 并发数: {max_instances}, 需要执行 {total_rounds} 轮")
         
         
-        for round_num in range(1, total_rounds + 1):
+        try:
+            start_round = int(input(f"请输入起始轮次 (1-{total_rounds}，默认为1): ") or "1")
+            if start_round < 1 or start_round > total_rounds:
+                print(f"输入的起始轮次超出范围，将使用默认值1")
+                start_round = 1
+                
+            remaining_rounds = total_rounds - start_round + 1
+            exec_rounds = int(input(f"请输入要执行的轮数 (1-{remaining_rounds}，默认为{remaining_rounds}): ") or str(remaining_rounds))
+            if exec_rounds < 1 or exec_rounds > remaining_rounds:
+                print(f"输入的执行轮数超出范围，将使用默认值{remaining_rounds}")
+                exec_rounds = remaining_rounds
+                
+            end_round = start_round + exec_rounds - 1
+            if end_round > total_rounds:
+                end_round = total_rounds
+                
+            print(f"\n将从第 {start_round} 轮开始，执行到第 {end_round} 轮，共 {exec_rounds} 轮")
+        except ValueError:
+            print("输入格式错误，将使用默认设置")
+            start_round = 1
+            end_round = total_rounds
+            exec_rounds = total_rounds
+        
+        
+        for round_num in range(start_round, end_round + 1):
             print(f"\n====== 开始执行第 {round_num}/{total_rounds} 轮任务 ======\n")
             
             
@@ -267,9 +297,9 @@ async def operationEnv(context):
                 result = await page.evaluate('''() => {
                     const elements = Array.from(document.querySelectorAll('p')).filter(el => el.textContent.trim() === 'Play now');
                     if (elements.length > 0) {
-                        // 找到包含此p元素的按钮或a标签
+                        
                         let clickTarget = elements[0];
-                        // 向上查找可能的按钮
+                        
                         while (clickTarget && clickTarget.tagName !== 'BODY') {
                             if (clickTarget.tagName === 'BUTTON' || clickTarget.tagName === 'A') {
                                 break;
@@ -302,6 +332,300 @@ async def operationEnv(context):
             
             
             try:
+                print("检查是否出现'MAXIMUM GAMEPLAY REACHED'模态框...")
+                
+                
+                max_gameplay_modal = await page.evaluate('''() => {
+                   
+                    const textElements = Array.from(document.querySelectorAll('*')).filter(
+                        el => {
+                            const text = el.textContent || '';
+                           
+                            return text.toUpperCase().includes('MAXIMUM') && 
+                                   text.toUpperCase().includes('GAMEPLAY') && 
+                                   text.toUpperCase().includes('REACHED');
+                        }
+                    );
+                    
+                    if (textElements.length > 0) {
+                        return {found: true, method: 'text'};
+                    }
+                    
+                    
+                    const tomorrowElements = Array.from(document.querySelectorAll('*')).filter(
+                        el => {
+                            const text = el.textContent || '';
+                            return text.toUpperCase().includes('PLAY') && 
+                                   text.toUpperCase().includes('AGAIN') && 
+                                   text.toUpperCase().includes('TOMORROW');
+                        }
+                    );
+                    
+                    if (tomorrowElements.length > 0) {
+                        return {found: true, method: 'tomorrow'};
+                    }
+                    
+                   
+                    
+                    const possibleModals = Array.from(document.querySelectorAll('div')).filter(el => {
+                        if (!el.children || el.children.length === 0) return false;
+                        
+                        const style = window.getComputedStyle(el);
+                        const position = style.position;
+                        const bgColor = style.backgroundColor || '';
+                        const opacity = parseFloat(style.opacity || 1);
+                        const zIndex = parseInt(style.zIndex || 0);
+                        
+                      
+                        return (position === 'fixed' || position === 'absolute') &&
+                               (bgColor.includes('rgba') || bgColor.includes('rgb')) &&
+                               opacity < 1 &&
+                               zIndex > 10 &&
+                               el.offsetWidth > window.innerWidth * 0.5 &&
+                               el.offsetHeight > window.innerHeight * 0.5;
+                    });
+                    
+                    if (possibleModals.length > 0) {
+                        return {found: true, method: 'visual'};
+                    }
+                    
+                   
+                    const closeButtons = Array.from(document.querySelectorAll('*')).filter(el => {
+                        const text = el.textContent || '';
+                        const style = window.getComputedStyle(el);
+                        return (text === 'X' || text === '×' || text === '✕' || text === '✖') &&
+                               (style.position === 'absolute' || style.position === 'fixed') &&
+                               style.cursor === 'pointer';
+                    });
+                    
+                    if (closeButtons.length > 0) {
+                      
+                        for (const btn of closeButtons) {
+                            const rect = btn.getBoundingClientRect();
+                            if (rect.top < window.innerHeight * 0.4 && rect.right > window.innerWidth * 0.6) {
+                                return {found: true, method: 'closeBtn'};
+                            }
+                        }
+                    }
+                    
+                   
+                    const totalElements = Array.from(document.querySelectorAll('*')).filter(
+                        el => {
+                            const text = el.textContent || '';
+                            return text.toUpperCase().includes('TOTAL') && 
+                                   /\d+/.test(text);
+                        }
+                    );
+                    
+                    if (totalElements.length > 0) {
+                        return {found: true, method: 'total'};
+                    }
+                    
+                    return {found: false};
+                }''')
+                
+                if max_gameplay_modal.get('found', False):
+                    print(f"检测到'MAXIMUM GAMEPLAY REACHED'模态框 (检测方法: {max_gameplay_modal.get('method', 'unknown')})，尝试关闭...")
+                    
+                    
+                    close_button_clicked = await page.evaluate('''() => {
+                        
+                       
+                        const vw = window.innerWidth;
+                        const vh = window.innerHeight;
+                        
+                        
+                        const rightTopX = vw * 0.85; 
+                        const rightTopY = vh * 0.25; 
+                        
+                        
+                        const element = document.elementFromPoint(rightTopX, rightTopY);
+                        
+                      
+                        if (element) {
+                          
+                            const text = element.textContent || '';
+                            if (text === 'X' || text === '×' || text === '✕' || text === '✖') {
+                                element.click();
+                                return true;
+                            }
+                            
+                          
+                            let clickTarget = element;
+                            const maxLevels = 5; 
+                            for (let i = 0; i < maxLevels; i++) {
+                                if (!clickTarget || clickTarget.tagName === 'BODY') break;
+                                
+                                const style = window.getComputedStyle(clickTarget);
+                                if (clickTarget.tagName === 'BUTTON' || 
+                                    clickTarget.tagName === 'A' || 
+                                    style.cursor === 'pointer') {
+                                    clickTarget.click();
+                                    return true;
+                                }
+                                
+                                clickTarget = clickTarget.parentElement;
+                            }
+                            
+                            
+                            element.click();
+                            return true;
+                        }
+                        
+                       
+                        const closeButtons = Array.from(document.querySelectorAll('*')).filter(el => {
+                            const text = el.textContent || '';
+                            const style = window.getComputedStyle(el);
+                            return (text === 'X' || text === '×' || text === '✕' || text === '✖') &&
+                                   style.cursor === 'pointer';
+                        });
+                        
+                        if (closeButtons.length > 0) {
+                            closeButtons[0].click();
+                            return true;
+                        }
+                        
+                       
+                        const modalContainer = document.querySelector('div[class*="modal"], div[role="dialog"]');
+                        let closeBtn = null;
+                        
+                        if (modalContainer) {
+                         
+                            closeBtn = modalContainer.querySelector('button[aria-label="Close"], button[class*="close"]');
+                            
+                            if (closeBtn) {
+                                closeBtn.click();
+                                return true;
+                            }
+                        }
+                        
+                        return false;
+                    }''')
+                    
+                    if close_button_clicked:
+                        print("成功点击模态框关闭按钮")
+                    else:
+                        print("未找到明确的关闭按钮，尝试点击模态框外区域...")
+                        
+                        
+                        outside_clicked = await page.evaluate('''() => {
+                     
+                            const vw = window.innerWidth;
+                            const vh = window.innerHeight;
+                            
+                       
+                            const clickEvent = new MouseEvent('click', {
+                                'view': window,
+                                'bubbles': true,
+                                'cancelable': true
+                            });
+                            
+                        
+                            const points = [
+                                {x: 10, y: 10},           
+                                {x: vw - 10, y: 10},       
+                                {x: 10, y: vh - 10},     
+                                {x: vw - 10, y: vh - 10}, 
+                                {x: vw / 2, y: 10},        
+                                {x: vw / 2, y: vh - 10},  
+                                {x: 10, y: vh / 2},       
+                                {x: vw - 10, y: vh / 2}   
+                            ];
+                            
+                            let success = false;
+                            for (const point of points) {
+                                const elem = document.elementFromPoint(point.x, point.y);
+                                if (elem) {
+                                    elem.dispatchEvent(clickEvent);
+                                    success = true;
+                                }
+                            }
+                            
+                            return success;
+                        }''')
+                        
+                        if outside_clicked:
+                            print("成功点击模态框外区域")
+                        else:
+                            print("点击模态框外区域失败，尝试按ESC键...")
+                            await page.keyboard.press('Escape')
+                    
+                    
+                    await asyncio.sleep(2)
+                    
+                    
+                    modal_gone = await page.evaluate('''() => {
+                        
+                        const textElements = Array.from(document.querySelectorAll('*')).filter(
+                            el => {
+                                const text = el.textContent || '';
+                                return text.toUpperCase().includes('MAXIMUM') && 
+                                       text.toUpperCase().includes('GAMEPLAY') && 
+                                       text.toUpperCase().includes('REACHED');
+                            }
+                        );
+                        
+                        if (textElements.length > 0) {
+                            return false;
+                        }
+                        
+                       
+                        const tomorrowElements = Array.from(document.querySelectorAll('*')).filter(
+                            el => {
+                                const text = el.textContent || '';
+                                return text.toUpperCase().includes('PLAY') && 
+                                       text.toUpperCase().includes('AGAIN') && 
+                                       text.toUpperCase().includes('TOMORROW');
+                            }
+                        );
+                        
+                        if (tomorrowElements.length > 0) {
+                            return false; 
+                        }
+                        
+                       
+                        const totalElements = Array.from(document.querySelectorAll('*')).filter(
+                            el => {
+                                const text = el.textContent || '';
+                                return text.toUpperCase().includes('TOTAL') && 
+                                       /\d+/.test(text);
+                            }
+                        );
+                        
+                        if (totalElements.length > 0) {
+                            return false; 
+                        }
+                        
+                        return true;
+                    }''')
+                    
+                    if modal_gone:
+                        print("成功关闭'MAXIMUM GAMEPLAY REACHED'模态框")
+                    else:
+                        print("模态框仍然存在，尝试其他方法关闭...")
+                        
+                        try:
+                            
+                            vw = await page.evaluate('window.innerWidth')
+                            vh = await page.evaluate('window.innerHeight')
+                            
+                            
+                            x_button_x = int(vw * 0.85)
+                            x_button_y = int(vh * 0.25)
+                            
+                            
+                            await page.mouse.click(x_button_x, x_button_y)
+                            print(f"尝试直接点击位置 ({x_button_x}, {x_button_y})")
+                            
+                            
+                            await asyncio.sleep(2)
+                        except Exception as e_mouse:
+                            print(f"鼠标点击失败: {str(e_mouse)}")
+            except Exception as e_modal:
+                print(f"处理模态框时出错: {str(e_modal)}")
+            
+            
+            try:
                 
                 continue_xpath = "//div[contains(text(),'Continue')]"
                 continue_button = await page.wait_for_selector(continue_xpath, timeout=5000, state="visible")
@@ -325,7 +649,7 @@ async def operationEnv(context):
                         );
                         if (elements.length > 0) {
                             let clickTarget = elements[0];
-                            // 向上查找可能的按钮
+                         
                             while (clickTarget && clickTarget.tagName !== 'BODY') {
                                 if (clickTarget.tagName === 'BUTTON' || clickTarget.tagName === 'A' || 
                                     clickTarget.getAttribute('role') === 'button' || 
@@ -353,7 +677,25 @@ async def operationEnv(context):
         
         if continue_clicked:
             print("等待游戏加载...")
-            await asyncio.sleep(5)  
+            
+            await asyncio.sleep(8)  
+            
+            
+            current_url = page.url
+            print(f"当前页面URL: {current_url}")
+            
+            
+            try:
+                print("检查页面加载状态...")
+                
+                await page.wait_for_load_state('networkidle', timeout=10000)
+                print("页面网络请求已完成")
+            except Exception as e_load:
+                print(f"等待页面加载完成时出错，但继续执行: {str(e_load)}")
+            
+            
+            page_title = await page.title()
+            print(f"页面标题: {page_title}")
             
             
             max_cycles = 3  
@@ -364,18 +706,96 @@ async def operationEnv(context):
                 print(f"开始第 {current_cycle}/{max_cycles} 轮游戏")
                 
                 
+                game_loaded = await page.evaluate('''() => {
+                   
+                    const gameElements = document.querySelectorAll('.cell, .grid, .board, .game-container');
+                    return gameElements.length > 0;
+                }''')
+                
+                if not game_loaded:
+                    print("警告: 可能未正确加载游戏页面，尝试重新检查...")
+                    
+                    await asyncio.sleep(5)
+                
+                
                 try:
+                    print("检查inject.js文件...")
+                    
+                    if not os.path.exists('inject.js'):
+                        print("错误: inject.js文件不存在!")
+                        break
+                    
                     print("读取注入脚本...")
-                    with open('inject.js', 'r', encoding='utf-8') as f:
-                        inject_script = f.read()
+                    try:
+                        with open('inject.js', 'r', encoding='utf-8') as f:
+                            inject_script = f.read()
+                        print(f"注入脚本读取成功，大小: {len(inject_script)} 字节")
+                    except Exception as e_read:
+                        print(f"读取inject.js文件失败: {str(e_read)}")
+                        break
                     
                     print("注入扫雷自动解决脚本...")
-                    await page.evaluate(inject_script)
-                    print("脚本注入成功！自动扫雷开始运行")
+                    try:
+                        
+                        pre_inject_check = await page.evaluate('''() => {
+                            return {
+                                url: window.location.href,
+                                title: document.title,
+                                elements: document.body.innerHTML.length,
+                                readyState: document.readyState
+                            };
+                        }''')
+                        print(f"注入前页面状态: {pre_inject_check}")
+                        
+                        
+                        await page.evaluate(inject_script)
+                        print("脚本注入成功！自动扫雷开始运行")
+                        
+                        
+                        post_inject_check = await page.evaluate('''() => {
+                        
+                            return {
+                                scriptRunning: window.autoMinesweeperRunning === true || false,
+                                minesweeperHelper: typeof window.minesweeperHelper !== 'undefined',
+                                errors: window.lastInjectionError || 'none'
+                            };
+                        }''')
+                        print(f"注入后状态: {post_inject_check}")
+                        
+                    except Exception as e_inject:
+                        print(f"执行脚本注入失败: {str(e_inject)}")
+                        print("尝试简化版注入...")
+                        
+                        
+                        try:
+                            await page.add_script_tag(content=inject_script)
+                            print("通过script标签注入成功")
+                        except Exception as e_simple_inject:
+                            print(f"简化注入也失败: {str(e_simple_inject)}")
+                            break
                     
                     
-                    print("让脚本运行50秒...")
-                    await asyncio.sleep(50)
+                    print("让脚本运行33秒...")
+                    
+                    for i in range(6):
+                        await asyncio.sleep(5)
+                        print(f"脚本运行中... {(i+1)*5}/33 秒")
+                        
+                        
+                        try:
+                            game_progress = await page.evaluate('''() => {
+                         
+                                const openedCells = document.querySelectorAll('.cell.open, .revealed, .flagged').length;
+                                return {
+                                    openedCells: openedCells,
+                                    time: new Date().toISOString()
+                                };
+                            }''')
+                            print(f"游戏进度: {game_progress}")
+                        except Exception as e_progress:
+                            print(f"检查游戏进度失败: {str(e_progress)}")
+                    
+                    await asyncio.sleep(3)  
                     
                     
                     print("检查'Play Again'按钮...")
@@ -409,7 +829,7 @@ async def operationEnv(context):
                                 );
                                 if (elements.length > 0) {
                                     let clickTarget = elements[0];
-                                    // 向上查找可能的按钮
+                                   
                                     while (clickTarget && clickTarget.tagName !== 'BODY') {
                                         if (clickTarget.tagName === 'BUTTON' || clickTarget.tagName === 'A' || 
                                             clickTarget.getAttribute('role') === 'button' || 
@@ -459,42 +879,42 @@ async def operationEnv(context):
                 
                 
                 result = await page.evaluate('''() => {
-                    // 获取视口尺寸
+                  
                     const vw = window.innerWidth;
                     const vh = window.innerHeight;
                     
-                    // 创建模拟点击事件
+                   
                     const clickEvent = new MouseEvent('click', {
                         'view': window,
                         'bubbles': true,
                         'cancelable': true
                     });
                     
-                    // 记录点击成功情况
+                   
                     let success = false;
                     
-                    // 尝试点击模态框外的区域 - 上方区域
+                
                     let elem = document.elementFromPoint(vw/2, vh*0.1);
                     if (elem) {
                         elem.dispatchEvent(clickEvent);
                         success = true;
                     }
                     
-                    // 尝试点击模态框外的区域 - 左侧区域
+               
                     elem = document.elementFromPoint(vw*0.1, vh/2);
                     if (elem) {
                         elem.dispatchEvent(clickEvent);
                         success = true;
                     }
                     
-                    // 尝试点击模态框外的区域 - 右侧区域
+                 
                     elem = document.elementFromPoint(vw*0.9, vh/2);
                     if (elem) {
                         elem.dispatchEvent(clickEvent);
                         success = true;
                     }
                     
-                    // 尝试点击模态框外的区域 - 下方区域
+                
                     elem = document.elementFromPoint(vw/2, vh*0.9);
                     if (elem) {
                         elem.dispatchEvent(clickEvent);
@@ -552,7 +972,7 @@ async def operationEnv(context):
                     try:
                         print("尝试通过JavaScript点击'Return Home'按钮...")
                         result = await page.evaluate('''() => {
-                            // 尝试找到文本包含"Return Home"的按钮
+                        
                             const buttons = Array.from(document.querySelectorAll('button')).filter(
                                 el => el.textContent.includes('Return Home')
                             );
@@ -561,16 +981,16 @@ async def operationEnv(context):
                                 return true;
                             }
                             
-                            // 尝试查找页面中间位置的突出按钮
+                         
                             const allButtons = document.querySelectorAll('button');
                             if (allButtons.length > 0) {
-                                // 找出页面中间位置的按钮
+                           
                                 const viewportHeight = window.innerHeight;
                                 const viewportWidth = window.innerWidth;
                                 const centerX = viewportWidth / 2;
                                 const centerY = viewportHeight / 2;
                                 
-                                // 找到距离中心点最近的按钮
+                            
                                 let closestButton = null;
                                 let closestDistance = Infinity;
                                 
@@ -632,7 +1052,7 @@ async def operationEnv(context):
                             );
                             if (elements.length > 0) {
                                 let clickTarget = elements[0];
-                                // 向上查找可能的按钮
+                             
                                 while (clickTarget && clickTarget.tagName !== 'BODY') {
                                     if (clickTarget.tagName === 'BUTTON' || clickTarget.tagName === 'A' || 
                                         clickTarget.getAttribute('role') === 'button' || 
@@ -698,7 +1118,7 @@ async def operationEnv(context):
                         try:
                             print("尝试通过JavaScript点击'Let's roll'按钮...")
                             result = await page.evaluate('''() => {
-                                // 首先尝试使用绝对路径定位
+                       
                                 const xpathResult = document.evaluate(
                                     "/html[1]/body[1]/div[1]/div[11]/div[3]/div[1]/div[1]/div[3]/button[1]", 
                                     document, 
@@ -712,8 +1132,7 @@ async def operationEnv(context):
                                     return true;
                                 }
                                 
-                                // 其他尝试方法
-                                // 尝试找到包含"Let's roll"文本的按钮
+                                
                                 const elements = Array.from(document.querySelectorAll('button')).filter(
                                     el => el.textContent.includes("Let's roll") || el.textContent.includes("Let's Roll")
                                 );
@@ -723,7 +1142,7 @@ async def operationEnv(context):
                                     return true;
                                 }
                                 
-                                // 如果没找到，尝试找到那个特定类名的按钮
+                              
                                 const classButton = document.querySelector('button[class*="hoEiop"]');
                                 if (classButton) {
                                     classButton.click();
@@ -764,14 +1183,14 @@ async def operationEnv(context):
                             try:
                                 print("尝试通过JavaScript点击'Throw Dice'按钮...")
                                 result = await page.evaluate('''() => {
-                                    // 尝试找到包含"Throw Dice"文本的元素
+                                  
                                     const elements = Array.from(document.querySelectorAll('p')).filter(
                                         el => el.textContent.trim() === 'Throw Dice'
                                     );
                                     
                                     if (elements.length > 0) {
                                         let clickTarget = elements[0];
-                                        // 向上查找可能的按钮
+                                     
                                         while (clickTarget && clickTarget.tagName !== 'BODY') {
                                             if (clickTarget.tagName === 'BUTTON' || clickTarget.tagName === 'A' || 
                                                 clickTarget.getAttribute('role') === 'button' || 
@@ -786,7 +1205,7 @@ async def operationEnv(context):
                                         }
                                     }
                                     
-                                    // 尝试通过更宽松的文本匹配
+                                   
                                     const allElements = Array.from(document.querySelectorAll('*'));
                                     const throwDiceElements = allElements.filter(
                                         el => el.textContent && el.textContent.includes('Throw Dice')
@@ -794,7 +1213,7 @@ async def operationEnv(context):
                                     
                                     if (throwDiceElements.length > 0) {
                                         let clickTarget = throwDiceElements[0];
-                                        // 向上查找可能的按钮
+                                   
                                         while (clickTarget && clickTarget.tagName !== 'BODY') {
                                             if (clickTarget.tagName === 'BUTTON' || clickTarget.tagName === 'A' || 
                                                 clickTarget.getAttribute('role') === 'button' || 
